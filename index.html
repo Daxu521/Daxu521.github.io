@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的鱼缸造景模拟器</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      background: #c8d6e0;
+      font-family: "PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif;
+    }
+
+    #viewer-wrap {
+      flex: 1 1 70%;
+      position: relative;
+      overflow: hidden;
+      transition: flex 0.3s ease;
+    }
+    body.sidebar-hidden #viewer-wrap { flex: 1 1 100%; }
+    #viewer-wrap canvas { display: block; }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      flex: 0 0 30%;
+      min-width: 0;
+      background: rgba(24,28,36,0.94);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid rgba(255,255,255,0.08);
+      overflow: hidden;
+      transition: flex 0.3s ease, opacity 0.25s ease, padding 0.3s ease;
+    }
+    body.sidebar-hidden #sidebar {
+      flex: 0 0 0;
+      opacity: 0;
+      padding: 0;
+      pointer-events: none;
+    }
+
+    #sidebar-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px 10px;
+      flex-shrink: 0;
+      border-bottom: 2px solid rgba(255,255,255,0.12);
+      margin: 0 12px;
+    }
+    #sidebar-head h2 {
+      color: #ddd;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 2px;
+    }
+    #model-count {
+      color: rgba(255,255,255,0.5);
+      font-size: 12px;
+      letter-spacing: 1px;
+      white-space: nowrap;
+    }
+    #model-count.full { color: #e05555; }
+
+    #sidebar-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 12px 20px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.12) transparent;
+    }
+    #sidebar-scroll::-webkit-scrollbar { width: 5px; }
+    #sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+
+    /* ── Buttons in viewer ── */
+    .viewer-btn {
+      position: absolute;
+      z-index: 5;
+      width: 34px; height: 34px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(20,24,32,0.7);
+      color: #ccc;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      line-height: 1;
+    }
+    .viewer-btn:hover { background: rgba(40,46,58,0.8); color: #fff; }
+    #btn-sidebar-toggle { top: 12px; right: 12px; }
+    #btn-reset { top: 12px; right: 52px; }
+
+    /* ── Category / item / variant ── */
+    .cat-section { margin-bottom: 4px; }
+    .cat-header {
+      display: flex; align-items: center; gap: 6px;
+      padding: 10px 10px;
+      color: #ccc; font-size: 14px; font-weight: 600; letter-spacing: 1px;
+      cursor: pointer; border-radius: 7px; user-select: none;
+      transition: background 0.15s;
+    }
+    .cat-header:hover { background: rgba(255,255,255,0.06); }
+    .cat-arrow {
+      display: inline-block; font-size: 10px; width: 14px; text-align: center;
+      transition: transform 0.25s;
+    }
+    .cat-section.collapsed .cat-arrow { transform: rotate(-90deg); }
+    .cat-badge { font-size: 11px; opacity: 0.45; font-weight: 400; margin-left: 4px; }
+    .cat-body { overflow: hidden; max-height: 4000px; transition: max-height 0.35s ease; }
+    .cat-section.collapsed .cat-body { max-height: 0; }
+
+    .item-section { margin: 2px 0 8px 10px; }
+    .item-header {
+      display: flex; align-items: center; gap: 5px;
+      padding: 7px 8px;
+      color: #bbb; font-size: 13px; font-weight: 500; letter-spacing: 0.5px;
+      cursor: pointer; border-radius: 5px; user-select: none;
+      transition: background 0.15s;
+    }
+    .item-header:hover { background: rgba(255,255,255,0.05); }
+    .item-arrow {
+      display: inline-block; font-size: 9px; width: 12px; text-align: center;
+      transition: transform 0.25s;
+    }
+    .item-section.collapsed .item-arrow { transform: rotate(-90deg); }
+    .item-count { font-size: 10px; opacity: 0.4; font-weight: 400; }
+    .item-body { overflow: hidden; max-height: 3000px; transition: max-height 0.3s ease; }
+    .item-section.collapsed .item-body { max-height: 0; }
+
+    .variant-card {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px; margin: 3px 0 3px 8px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.05);
+      transition: background 0.15s;
+    }
+    .variant-card:hover { background: rgba(255,255,255,0.07); }
+
+    .variant-thumb {
+      width: 56px; height: 56px; min-width: 56px;
+      border-radius: 6px;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      border: 1.5px dashed rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.03);
+      overflow: hidden;
+    }
+    .variant-thumb.has-image { border-style: solid; }
+    .variant-thumb img { width: 100%; height: 100%; object-fit: cover; display: none; }
+    .variant-thumb.has-image img { display: block; }
+    .variant-thumb .placeholder {
+      display: flex; flex-direction: column; align-items: center; gap: 1px;
+      color: rgba(255,255,255,0.3); font-size: 10px; letter-spacing: 0.5px;
+    }
+    .variant-thumb.has-image .placeholder { display: none; }
+    .placeholder-icon { font-size: 18px; opacity: 0.5; }
+
+    .variant-info { flex: 1; min-width: 0; }
+    .variant-name { color: #ddd; font-size: 12px; font-weight: 500; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .variant-meta { color: rgba(255,255,255,0.4); font-size: 10px; line-height: 1.5; }
+    .variant-meta span { margin-right: 6px; }
+
+    .variant-add-btn {
+      padding: 6px 11px;
+      font-size: 11px; font-weight: 500; letter-spacing: 1px;
+      color: #fff;
+      background: rgba(80,140,200,0.4);
+      border: 1px solid rgba(120,170,220,0.25);
+      border-radius: 5px; cursor: pointer;
+      white-space: nowrap; flex-shrink: 0;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+    .variant-add-btn:hover { background: rgba(80,140,200,0.6); border-color: rgba(140,190,240,0.45); }
+    .variant-add-btn:disabled { opacity: 0.3; cursor: not-allowed; background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.08); }
+
+    /* ── Title / Hints / Toast ── */
+    #title {
+      position: fixed; top: 24px; left: 28px; z-index: 10;
+      background: rgba(0,0,0,0.45);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      color: #fff; padding: 10px 22px; border-radius: 12px;
+      font-size: 20px; font-weight: 600; letter-spacing: 2px;
+      pointer-events: none; user-select: none;
+    }
+    #hint {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.5); font-size: 11px; letter-spacing: 1px;
+      pointer-events: none; user-select: none;
+      background: rgba(0,0,0,0.3); padding: 5px 14px; border-radius: 6px;
+      z-index: 5;
+    }
+    #toast {
+      position: fixed; top: 24px; right: calc(30% + 24px); z-index: 30;
+      background: rgba(200,60,60,0.85); color: #fff;
+      padding: 8px 18px; border-radius: 8px; font-size: 13px; letter-spacing: 1px;
+      pointer-events: none; opacity: 0; transition: opacity 0.25s;
+    }
+    body.sidebar-hidden #toast { right: 24px; }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="title">我的鱼缸造景模拟器</div>
+  <div id="toast"></div>
+
+  <div id="viewer-wrap">
+    <button class="viewer-btn" id="btn-sidebar-toggle" title="折叠/展开侧边栏">◀</button>
+    <button class="viewer-btn" id="btn-reset" title="重置视角">⌂</button>
+  </div>
+
+  <div id="sidebar">
+    <div id="sidebar-head">
+      <h2>素材库</h2>
+      <span id="model-count">0 / 30</span>
+    </div>
+    <div id="sidebar-scroll"></div>
+  </div>
+
+  <div id="hint">左键拖拽移动 · Shift+拖拽调高度 · Ctrl+拖拽旋转 · 右键删除</div>
+
+  <script type="importmap">
+    { "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }}
+  </script>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { Line2 } from "three/addons/lines/Line2.js";
+    import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+    import { LineGeometry } from "three/addons/lines/LineGeometry.js";
+    import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+
+    // ══════════════════════════════════
+    // Material library
+    // ══════════════════════════════════
+    const LIBRARY = [
+      { id:"wood", label:"造景木模型", items: [
+        { id:"rhododendron", name:"杜鹃根", variants: [
+          { id:"rhodo_01",label:"杜鹃根 01",length:18,width:6,height:12,weight:320,glb:"",thumb:"",color:0x8B5A2B,geoType:"cylinder" },
+          { id:"rhodo_02",label:"杜鹃根 02",length:22,width:7,height:15,weight:400,glb:"",thumb:"",color:0x8B5A2B,geoType:"cylinder_taper" },
+          { id:"rhodo_03",label:"杜鹃根 03",length:15,width:5,height:10,weight:260,glb:"",thumb:"",color:0x8B5A2B,geoType:"cylinder" },
+        ]},
+        { id:"zita", name:"紫柚木", variants: [
+          { id:"zita_01",label:"紫柚木 01",length:20,width:5,height:10,weight:280,glb:"",thumb:"",color:0x6B3A2E,geoType:"torus_knot" },
+          { id:"zita_02",label:"紫柚木 02",length:17,width:6,height:11,weight:310,glb:"",thumb:"",color:0x6B3A2E,geoType:"torus_knot" },
+          { id:"zita_03",label:"紫柚木 03",length:24,width:5,height:9,weight:340,glb:"",thumb:"",color:0x6B3A2E,geoType:"cylinder_taper" },
+        ]},
+        { id:"coral_wood", name:"珊瑚沉木", variants: [
+          { id:"coral_01",label:"珊瑚沉木 01",length:15,width:8,height:14,weight:350,glb:"",thumb:"",color:0x5C3A28,geoType:"cylinder_taper" },
+          { id:"coral_02",label:"珊瑚沉木 02",length:19,width:9,height:16,weight:420,glb:"",thumb:"",color:0x5C3A28,geoType:"torus_knot" },
+        ]},
+        { id:"melaleuca", name:"千层木", variants: [
+          { id:"mela_01",label:"千层木 01",length:16,width:7,height:8,weight:260,glb:"",thumb:"",color:0x7B5A3B,geoType:"torus_knot" },
+          { id:"mela_02",label:"千层木 02",length:13,width:6,height:9,weight:230,glb:"",thumb:"",color:0x7B5A3B,geoType:"cylinder" },
+        ]},
+      ]},
+      { id:"stone", label:"造景石模型", items: [
+        { id:"qinglong", name:"青龙石", variants: [
+          { id:"ql_01",label:"青龙石 01",length:12,width:8,height:10,weight:800,glb:"",thumb:"",color:0x5A6B7A,geoType:"dodecahedron" },
+          { id:"ql_02",label:"青龙石 02",length:14,width:9,height:11,weight:950,glb:"",thumb:"",color:0x5A6B7A,geoType:"icosahedron" },
+          { id:"ql_03",label:"青龙石 03",length:10,width:7,height:8,weight:680,glb:"",thumb:"",color:0x5A6B7A,geoType:"dodecahedron" },
+          { id:"ql_04",label:"青龙石 04",length:16,width:10,height:13,weight:1100,glb:"",thumb:"",color:0x5A6B7A,geoType:"icosahedron" },
+        ]},
+        { id:"songpi", name:"松皮石", variants: [
+          { id:"sp_01",label:"松皮石 01",length:10,width:7,height:8,weight:650,glb:"",thumb:"",color:0x7A6B5A,geoType:"dodecahedron" },
+          { id:"sp_02",label:"松皮石 02",length:13,width:8,height:9,weight:780,glb:"",thumb:"",color:0x7A6B5A,geoType:"icosahedron" },
+        ]},
+        { id:"volcano", name:"火山石", variants: [
+          { id:"vol_01",label:"火山石 01",length:8,width:6,height:7,weight:400,glb:"",thumb:"",color:0x4A3A3A,geoType:"icosahedron" },
+          { id:"vol_02",label:"火山石 02",length:10,width:7,height:8,weight:520,glb:"",thumb:"",color:0x4A3A3A,geoType:"dodecahedron" },
+          { id:"vol_03",label:"火山石 03",length:7,width:5,height:6,weight:350,glb:"",thumb:"",color:0x4A3A3A,geoType:"icosahedron" },
+        ]},
+        { id:"stream_st", name:"溪流石", variants: [
+          { id:"str_01",label:"溪流石 01",length:9,width:7,height:6,weight:550,glb:"",thumb:"",color:0x8A8A7A,geoType:"dodecahedron" },
+          { id:"str_02",label:"溪流石 02",length:11,width:8,height:7,weight:680,glb:"",thumb:"",color:0x8A8A7A,geoType:"icosahedron" },
+        ]},
+      ]},
+      { id:"sand", label:"砂砾模型", items: [
+        { id:"white_sand", name:"白沙", variants: [
+          { id:"ws_01",label:"白沙 01",length:14,width:10,height:2,weight:500,glb:"",thumb:"",color:0xF5F0E0,geoType:"sphere_group" },
+          { id:"ws_02",label:"白沙 02",length:18,width:12,height:3,weight:650,glb:"",thumb:"",color:0xF5F0E0,geoType:"sphere_group" },
+        ]},
+        { id:"stream_sand", name:"溪流沙", variants: [
+          { id:"ss_01",label:"溪流沙 01",length:14,width:10,height:2,weight:550,glb:"",thumb:"",color:0xD4C5A0,geoType:"sphere_group" },
+          { id:"ss_02",label:"溪流沙 02",length:16,width:11,height:3,weight:680,glb:"",thumb:"",color:0xD4C5A0,geoType:"sphere_group" },
+        ]},
+        { id:"yellow_sand", name:"黄沙", variants: [
+          { id:"ys_01",label:"黄沙 01",length:14,width:10,height:2,weight:480,glb:"",thumb:"",color:0xE8D5A0,geoType:"sphere_group" },
+          { id:"ys_02",label:"黄沙 02",length:17,width:12,height:3,weight:620,glb:"",thumb:"",color:0xE8D5A0,geoType:"sphere_group" },
+        ]},
+      ]}
+    ];
+
+    const MAX_MODELS = 30;
+
+    // Item letter codes
+    const ITEM_CODES = {};
+    const itemCounters = {};
+    LIBRARY.forEach(cat => {
+      cat.items.forEach(item => {
+        ITEM_CODES[item.id] = String.fromCharCode(97 + Object.keys(ITEM_CODES).length);
+        itemCounters[item.id] = 0;
+      });
+    });
+
+    // ══════════════════════════════════
+    // Scene / Renderer / Camera
+    // ══════════════════════════════════
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color("#c8d6e0");
+
+    const viewerWrap = document.getElementById("viewer-wrap");
+    const containerW = viewerWrap.clientWidth;
+    const containerH = window.innerHeight;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(containerW, containerH);
+    renderer.sortObjects = true;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    viewerWrap.appendChild(renderer.domElement);
+
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(containerW, containerH);
+    labelRenderer.domElement.style.position = "absolute";
+    labelRenderer.domElement.style.top = "0";
+    labelRenderer.domElement.style.pointerEvents = "none";
+    viewerWrap.appendChild(labelRenderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(50, containerW / containerH, 0.5, 100);
+    const INITIAL_CAM_POS = new THREE.Vector3(8, 4.5, 10);
+    const INITIAL_TARGET = new THREE.Vector3(0, 0, 0);
+    camera.position.copy(INITIAL_CAM_POS);
+    camera.lookAt(INITIAL_TARGET);
+
+    // ──────────────────────────────────
+    // OrbitControls
+    // ──────────────────────────────────
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.minDistance = 5;
+    controls.maxDistance = 22;
+    controls.maxPolarAngle = Math.PI * 0.72;
+    controls.target.copy(INITIAL_TARGET);
+    controls.update();
+
+    // ──────────────────────────────────
+    // Lighting + shadows
+    // ──────────────────────────────────
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 0.25));
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    dirLight.position.set(6, 12, 6);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 50;
+    dirLight.shadow.camera.left = -10;
+    dirLight.shadow.camera.right = 10;
+    dirLight.shadow.camera.top = 8;
+    dirLight.shadow.camera.bottom = -8;
+    dirLight.shadow.bias = -0.0004;
+    dirLight.shadow.normalBias = 0.02;
+    scene.add(dirLight);
+
+    const fillLight = new THREE.DirectionalLight(0xccddff, 0.3);
+    fillLight.position.set(-4, 2, -4);
+    scene.add(fillLight);
+
+    // ──────────────────────────────────
+    // GridHelper
+    // ──────────────────────────────────
+    const grid = new THREE.GridHelper(16, 20, 0xbbbbbb, 0xdddddd);
+    grid.position.y = -2.55;
+    grid.material.transparent = true;
+    grid.material.opacity = 0.5;
+    scene.add(grid);
+
+    // ──────────────────────────────────
+    // Tank constants
+    // ──────────────────────────────────
+    const TW = 9, TH = 4.5, TD = 4.5;
+    const HW = TW / 2, HH = TH / 2, HD = TD / 2;
+    const PLATE_H = 0.08;
+    const FLOOR_Y = -HH + PLATE_H;
+
+    const tankGroup = new THREE.Group();
+    scene.add(tankGroup);
+
+    // 1. Bottom plate (receives shadows)
+    const plateGeo = new THREE.BoxGeometry(TW, PLATE_H, TD);
+    const plateMat2 = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.55, metalness: 0.05 });
+    const plate = new THREE.Mesh(plateGeo, plateMat2);
+    plate.position.y = -HH + PLATE_H / 2;
+    plate.receiveShadow = true;
+    plate.renderOrder = 0;
+    tankGroup.add(plate);
+
+    // 2. Border edges
+    const corners = [
+      [-HW,-HH,-HD],[-HW,-HH,HD],[-HW,HH,-HD],[-HW,HH,HD],
+      [HW,-HH,-HD],[HW,-HH,HD],[HW,HH,-HD],[HW,HH,HD],
+    ];
+    const edgePairs = [
+      [0,2],[1,3],[4,6],[5,7],[0,4],[2,6],[3,7],[1,5],[0,1],[2,3],[6,7],[4,5],
+    ];
+    const lineMat = new LineMaterial({
+      color: 0xaaaaaa, lineWidth: 2, transparent: true, opacity: 0.85,
+      resolution: new THREE.Vector2(containerW, containerH),
+    });
+    edgePairs.forEach(([a, b]) => {
+      const segGeo = new LineGeometry();
+      segGeo.setPositions([...corners[a], ...corners[b]]);
+      const seg = new Line2(segGeo, lineMat);
+      seg.renderOrder = 0;
+      tankGroup.add(seg);
+    });
+
+    // ══════════════════════════════════
+    // Model creation
+    // ══════════════════════════════════
+    const CM = 0.1;
+
+    function createModelFromVariant(variant) {
+      const L = variant.length * CM, W = variant.width * CM, H = variant.height * CM;
+      let obj;
+
+      switch (variant.geoType) {
+        case "cylinder": {
+          const geo = new THREE.CylinderGeometry(0.5, 0.5, 1, 10);
+          const mat = new THREE.MeshStandardMaterial({ color: variant.color, roughness: 0.55, metalness: 0.05 });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.scale.set(W, H, L);
+          mesh.rotation.z = (Math.random() - 0.5) * 0.2;
+          mesh.rotation.x = (Math.random() - 0.5) * 0.2;
+          mesh.castShadow = true; mesh.receiveShadow = true;
+          obj = mesh; break;
+        }
+        case "cylinder_taper": {
+          const geo = new THREE.CylinderGeometry(0.3, 0.55, 1, 10);
+          const mat = new THREE.MeshStandardMaterial({ color: variant.color, roughness: 0.5, metalness: 0.05 });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.scale.set(W, H, L);
+          mesh.rotation.z = (Math.random() - 0.5) * 0.4;
+          mesh.castShadow = true; mesh.receiveShadow = true;
+          obj = mesh; break;
+        }
+        case "torus_knot": {
+          const geo = new THREE.TorusKnotGeometry(0.45, 0.18, 80, 10, 2, 3);
+          const mat = new THREE.MeshStandardMaterial({ color: variant.color, roughness: 0.45, metalness: 0.05 });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.scale.set(L * 0.55, H * 0.55, W * 0.55);
+          mesh.castShadow = true; mesh.receiveShadow = true;
+          obj = mesh; break;
+        }
+        case "dodecahedron": {
+          const geo = new THREE.DodecahedronGeometry(0.5, 0);
+          const mat = new THREE.MeshStandardMaterial({ color: variant.color, roughness: 0.5, metalness: 0.1 });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.scale.set(L, H, W);
+          mesh.castShadow = true; mesh.receiveShadow = true;
+          obj = mesh; break;
+        }
+        case "icosahedron": {
+          const geo = new THREE.IcosahedronGeometry(0.5, 1);
+          const pos = geo.attributes.position;
+          for (let i = 0; i < pos.count; i++) {
+            const r = Math.sqrt(pos.getX(i)**2 + pos.getY(i)**2 + pos.getZ(i)**2);
+            const n = 0.7 + Math.random() * 0.6;
+            pos.setXYZ(i, pos.getX(i)*n, pos.getY(i)*n*0.7, pos.getZ(i)*n);
+          }
+          geo.computeVertexNormals();
+          const mat = new THREE.MeshStandardMaterial({ color: variant.color, roughness: 0.55, metalness: 0.08 });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.scale.set(L, H, W);
+          mesh.castShadow = true; mesh.receiveShadow = true;
+          obj = mesh; break;
+        }
+        case "sphere_group": {
+          const group = new THREE.Group();
+          const count = 14;
+          for (let i = 0; i < count; i++) {
+            const r = 0.08 + Math.random() * 0.16;
+            const sGeo = new THREE.SphereGeometry(r, 6, 5);
+            const p = sGeo.attributes.position;
+            for (let j = 0; j < p.count; j++) p.setY(j, p.getY(j) * 0.35);
+            sGeo.computeVertexNormals();
+            const sMat = new THREE.MeshStandardMaterial({
+              color: new THREE.Color(variant.color).multiplyScalar(0.85 + Math.random() * 0.3),
+              roughness: 0.7,
+            });
+            const sphere = new THREE.Mesh(sGeo, sMat);
+            sphere.castShadow = true; sphere.receiveShadow = true;
+            sphere.position.set(
+              (Math.random() - 0.5) * L * 0.85,
+              Math.random() * H * 0.5,
+              (Math.random() - 0.5) * W * 0.85
+            );
+            group.add(sphere);
+          }
+          obj = group; break;
+        }
+        default: {
+          obj = new THREE.Mesh(new THREE.BoxGeometry(L, H, W),
+            new THREE.MeshStandardMaterial({ color: variant.color }));
+        }
+      }
+
+      obj.renderOrder = 0;
+      obj.userData.isPlacedModel = true;
+      obj.userData.variantRef = variant;
+
+      const bbox = new THREE.Box3().setFromObject(obj);
+      const size = new THREE.Vector3(); bbox.getSize(size);
+      obj.userData.halfExt = { x: size.x / 2, y: size.y / 2, z: size.z / 2 };
+
+      return obj;
+    }
+
+    const PLACEMENT_PADDING = -0.08;
+
+    function randomTankPos(halfExt) {
+      return {
+        x: (Math.random() - 0.5) * 2 * (HW - halfExt.x),
+        z: (Math.random() - 0.5) * 2 * (HD - halfExt.z),
+        y: FLOOR_Y + halfExt.y,
+      };
+    }
+
+    function isOverlapping(halfExt, pos) {
+      for (const m of placedModels) {
+        const h = m.userData.halfExt, p = m.position;
+        if (
+          Math.abs(pos.x - p.x) < halfExt.x + h.x + PLACEMENT_PADDING &&
+          Math.abs(pos.y - p.y) < halfExt.y + h.y + PLACEMENT_PADDING &&
+          Math.abs(pos.z - p.z) < halfExt.z + h.z + PLACEMENT_PADDING
+        ) return true;
+      }
+      return false;
+    }
+
+    function findPlacementPos(halfExt, maxAttempts = 40) {
+      for (let i = 0; i < maxAttempts; i++) {
+        const pos = randomTankPos(halfExt);
+        if (!isOverlapping(halfExt, pos)) return pos;
+      }
+      return null;
+    }
+
+    // ══════════════════════════════════
+    // Placed models
+    // ══════════════════════════════════
+    let modelCounter = 0;
+    const placedModels = [];
+    let selectedModel = null;
+    let isDragging = false;
+    let lastPointerY = 0, lastPointerX = 0;
+
+    function clampModelToTank(model) {
+      const bbox = new THREE.Box3().setFromObject(model);
+      if (bbox.min.x < -HW) model.position.x += -HW - bbox.min.x;
+      if (bbox.max.x >  HW) model.position.x +=  HW - bbox.max.x;
+      if (bbox.min.y < FLOOR_Y) model.position.y += FLOOR_Y - bbox.min.y;
+      if (bbox.min.z < -HD) model.position.z += -HD - bbox.min.z;
+      if (bbox.max.z >  HD) model.position.z +=  HD - bbox.max.z;
+    }
+
+    // ── Labels ──
+    const LABEL_Y = HH + 0.7;
+
+    function createModelLabel(model, itemId, num) {
+      const code = ITEM_CODES[itemId];
+      const labelText = `${code}${String(num).padStart(2, "0")}`;
+      const lineGeo = new THREE.BufferGeometry();
+      const pts = new Float32Array([model.position.x, model.position.y, model.position.z, model.position.x, LABEL_Y, model.position.z]);
+      lineGeo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
+      const lineMat2 = new THREE.LineDashedMaterial({ color: 0x999999, dashSize: 0.25, gapSize: 0.2, transparent: true, opacity: 0.3 });
+      const line = new THREE.Line(lineGeo, lineMat2);
+      line.computeLineDistances();
+      scene.add(line);
+      const div = document.createElement("div");
+      div.textContent = labelText;
+      div.style.cssText = "color:rgba(220,220,220,0.85);font-size:10px;font-family:monospace;background:rgba(0,0,0,0.45);padding:2px 7px;border-radius:4px;white-space:nowrap;letter-spacing:1px;";
+      const label = new CSS2DObject(div);
+      label.position.set(model.position.x, LABEL_Y, model.position.z);
+      scene.add(label);
+      model.userData._connLine = line;
+      model.userData._label = label;
+    }
+
+    function updateModelLabel(model) {
+      const line = model.userData._connLine, label = model.userData._label;
+      if (!line || !label) return;
+      const p = model.position;
+      const arr = line.geometry.attributes.position.array;
+      arr[0]=p.x; arr[1]=p.y; arr[2]=p.z; arr[3]=p.x; arr[4]=LABEL_Y; arr[5]=p.z;
+      line.geometry.attributes.position.needsUpdate = true;
+      line.computeLineDistances();
+      label.position.set(p.x, LABEL_Y, p.z);
+    }
+
+    function removeModelLabel(model) {
+      if (model.userData._connLine) {
+        model.userData._connLine.geometry.dispose();
+        model.userData._connLine.material.dispose();
+        scene.remove(model.userData._connLine);
+      }
+      if (model.userData._label) scene.remove(model.userData._label);
+    }
+
+    // ── Cursor dot (during drag) ──
+    const dotGeo = new THREE.RingGeometry(0.06, 0.1, 16);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+    const cursorDot = new THREE.Mesh(dotGeo, dotMat);
+    cursorDot.rotation.x = -Math.PI / 2;
+    cursorDot.visible = false;
+    cursorDot.renderOrder = 999;
+    scene.add(cursorDot);
+
+    // ── Drag shadow ──
+    const shadowGeo = new THREE.CircleGeometry(0.55, 16);
+    const shadowMat2 = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide });
+    const dragShadow = new THREE.Mesh(shadowGeo, shadowMat2);
+    dragShadow.rotation.x = -Math.PI / 2;
+    dragShadow.position.y = FLOOR_Y + 0.01;
+    dragShadow.visible = false;
+    dragShadow.renderOrder = 0;
+    tankGroup.add(dragShadow);
+
+    // ── Count display ──
+    const countEl = document.getElementById("model-count");
+    function updateCount() {
+      countEl.textContent = `${placedModels.length} / ${MAX_MODELS}`;
+      countEl.classList.toggle("full", placedModels.length >= MAX_MODELS);
+    }
+    function updateAddButtons() {
+      const full = placedModels.length >= MAX_MODELS;
+      document.querySelectorAll(".variant-add-btn").forEach(b => { b.disabled = full; });
+    }
+
+    // ── Log ──
+    function logModels() {
+      console.log(`--- 当前模型 (${placedModels.length}/${MAX_MODELS}) ---`);
+      placedModels.forEach(m => console.log(`  ${m.userData.id} [${m.userData.variantRef.label}]: (${m.position.x.toFixed(2)}, ${m.position.y.toFixed(2)}, ${m.position.z.toFixed(2)})`));
+    }
+
+    // ── Add ──
+    function addModelFromVariant(variant) {
+      if (placedModels.length >= MAX_MODELS) {
+        showToast(`已达上限 ${MAX_MODELS} 个`);
+        return;
+      }
+      const model = createModelFromVariant(variant);
+      const pos = findPlacementPos(model.userData.halfExt);
+      if (!pos) {
+        model.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) { if (Array.isArray(c.material)) c.material.forEach(m=>m.dispose()); else c.material.dispose(); } });
+        showToast(`鱼缸已满，无法添加【${variant.label}】`);
+        return;
+      }
+      modelCounter++;
+      model.userData.id = `${variant.id}_${modelCounter}`;
+      model.position.set(pos.x, pos.y, pos.z);
+      model.rotation.set(0, Math.random() * Math.PI * 2, 0);
+      tankGroup.add(model);
+      placedModels.push(model);
+
+      const libItem = LIBRARY.flatMap(c => c.items).find(it => it.variants.some(v => v.id === variant.id));
+      if (libItem) {
+        itemCounters[libItem.id] = (itemCounters[libItem.id] || 0) + 1;
+        createModelLabel(model, libItem.id, itemCounters[libItem.id]);
+      }
+      updateCount(); updateAddButtons(); logModels();
+    }
+
+    // ── Select / deselect ──
+    function selectModel(model) {
+      if (selectedModel === model) return;
+      deselectModel();
+      selectedModel = model;
+      highlightModel(model, true);
+    }
+    function deselectModel() {
+      if (selectedModel) { highlightModel(selectedModel, false); selectedModel = null; }
+      isDragging = false;
+    }
+    function highlightModel(model, on) {
+      model.traverse(c => {
+        if (c.isMesh && c.material.emissive) {
+          if (on) {
+            c.material._origEmissive = c.material.emissive.getHex();
+            c.material._origEmissiveIntensity = c.material.emissiveIntensity;
+            c.material.emissive = new THREE.Color(0xffd700);
+            c.material.emissiveIntensity = 0.45;
+          } else if (c.material._origEmissive !== undefined) {
+            c.material.emissive = new THREE.Color(c.material._origEmissive);
+            c.material.emissiveIntensity = c.material._origEmissiveIntensity;
+          }
+        }
+      });
+    }
+
+    // ── Delete ──
+    function deleteModel(model) {
+      const idx = placedModels.indexOf(model);
+      if (idx !== -1) placedModels.splice(idx, 1);
+      if (selectedModel === model) { selectedModel = null; isDragging = false; }
+      model.traverse(c => {
+        if (c.geometry) c.geometry.dispose();
+        if (c.material) { if (Array.isArray(c.material)) c.material.forEach(m=>m.dispose()); else c.material.dispose(); }
+      });
+      removeModelLabel(model);
+      tankGroup.remove(model);
+      updateCount(); updateAddButtons(); logModels();
+    }
+
+    // ══════════════════════════════════
+    // Drag
+    // ══════════════════════════════════
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    const intersection = new THREE.Vector3();
+
+    function screenToNdc(event) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    }
+
+    function startDrag(model, event) {
+      selectModel(model);
+      isDragging = true;
+      lastPointerX = event.clientX; lastPointerY = event.clientY;
+      controls.enabled = false;
+      dragShadow.visible = true;
+      cursorDot.visible = true;
+      dragShadow.position.x = model.position.x;
+      dragShadow.position.z = model.position.z;
+      applyPointerToModel(event);
+    }
+
+    function applyPointerToModel(event) {
+      if (!selectedModel) return;
+      const model = selectedModel;
+
+      if (event.ctrlKey) {
+        const dx = event.clientX - lastPointerX, dy = event.clientY - lastPointerY;
+        model.rotation.y += dx * 0.01;
+        model.rotation.x += dy * 0.01;
+        lastPointerX = event.clientX; lastPointerY = event.clientY;
+        cursorDot.visible = false;
+      } else if (event.shiftKey) {
+        const deltaY = (lastPointerY - event.clientY) * 0.03;
+        model.position.y += deltaY;
+        lastPointerY = event.clientY;
+        cursorDot.visible = false;
+      } else {
+        screenToNdc(event);
+        raycaster.setFromCamera(mouse, camera);
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -model.position.y);
+        const hit = raycaster.ray.intersectPlane(plane, intersection);
+        if (hit) {
+          model.position.x = hit.x;
+          model.position.z = hit.z;
+          cursorDot.position.copy(hit);
+          cursorDot.position.y += 0.02;
+          cursorDot.visible = true;
+        }
+      }
+
+      clampModelToTank(model);
+      updateModelLabel(model);
+      dragShadow.position.x = model.position.x;
+      dragShadow.position.z = model.position.z;
+    }
+
+    function endDrag() {
+      if (!isDragging) return;
+      isDragging = false;
+      controls.enabled = true;
+      dragShadow.visible = false;
+      cursorDot.visible = false;
+      logModels();
+    }
+
+    // ══════════════════════════════════
+    // Canvas events
+    // ══════════════════════════════════
+    renderer.domElement.addEventListener("contextmenu", e => e.preventDefault());
+
+    renderer.domElement.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      screenToNdc(event);
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObjects(placedModels, true);
+      if (hits.length > 0) {
+        let obj = hits[0].object;
+        while (obj && !(obj.userData && obj.userData.isPlacedModel)) obj = obj.parent;
+        if (obj && obj.userData.isPlacedModel) { event.stopPropagation(); startDrag(obj, event); return; }
+      }
+      deselectModel();
+    }, { capture: true });
+
+    renderer.domElement.addEventListener("click", event => {
+      screenToNdc(event);
+      raycaster.setFromCamera(mouse, camera);
+      if (raycaster.intersectObjects(placedModels, true).length === 0) deselectModel();
+    });
+
+    window.addEventListener("pointermove", event => { if (isDragging) applyPointerToModel(event); });
+    window.addEventListener("pointerup", event => { if (isDragging && event.button === 0) endDrag(); });
+
+    // Right-click delete
+    let rightStart = null;
+    renderer.domElement.addEventListener("pointerdown", event => { if (event.button === 2) rightStart = { x: event.clientX, y: event.clientY }; });
+    window.addEventListener("pointerup", event => {
+      if (event.button !== 2 || !rightStart) return;
+      const dx = event.clientX - rightStart.x, dy = event.clientY - rightStart.y;
+      rightStart = null;
+      if (Math.sqrt(dx*dx+dy*dy) < 3) {
+        screenToNdc(event);
+        raycaster.setFromCamera(mouse, camera);
+        const hits = raycaster.intersectObjects(placedModels, true);
+        if (hits.length > 0) {
+          let obj = hits[0].object;
+          while (obj && !(obj.userData && obj.userData.isPlacedModel)) obj = obj.parent;
+          if (obj && obj.userData.isPlacedModel) deleteModel(obj);
+        }
+      }
+    });
+
+    // ══════════════════════════════════
+    // Toast
+    // ══════════════════════════════════
+    const toast = document.getElementById("toast");
+    let toastTimer;
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2000);
+    }
+
+    // ══════════════════════════════════
+    // Sidebar toggle
+    // ══════════════════════════════════
+    const btnToggle = document.getElementById("btn-sidebar-toggle");
+    btnToggle.addEventListener("click", () => {
+      document.body.classList.toggle("sidebar-hidden");
+      btnToggle.textContent = document.body.classList.contains("sidebar-hidden") ? "▶" : "◀";
+      setTimeout(() => {
+        const w = viewerWrap.clientWidth;
+        renderer.setSize(w, containerH);
+        labelRenderer.setSize(w, containerH);
+        camera.aspect = w / containerH;
+        camera.updateProjectionMatrix();
+        lineMat.resolution.set(w, containerH);
+      }, 320);
+    });
+
+    // ══════════════════════════════════
+    // Reset view
+    // ══════════════════════════════════
+    document.getElementById("btn-reset").addEventListener("click", () => {
+      camera.position.copy(INITIAL_CAM_POS);
+      controls.target.copy(INITIAL_TARGET);
+      controls.update();
+    });
+
+    // ══════════════════════════════════
+    // Build sidebar
+    // ══════════════════════════════════
+    (function buildSidebar() {
+      const scroll = document.getElementById("sidebar-scroll");
+      LIBRARY.forEach(cat => {
+        const catSec = document.createElement("div"); catSec.className = "cat-section";
+        const catHdr = document.createElement("div"); catHdr.className = "cat-header";
+        const tv = cat.items.reduce((s,it) => s + it.variants.length, 0);
+        catHdr.innerHTML = `<span class="cat-arrow">▼</span>${cat.label}<span class="cat-badge">${cat.items.length}类 ${tv}个</span>`;
+        catHdr.addEventListener("click", () => catSec.classList.toggle("collapsed"));
+        const catBody = document.createElement("div"); catBody.className = "cat-body";
+
+        cat.items.forEach(item => {
+          const itSec = document.createElement("div"); itSec.className = "item-section";
+          const itHdr = document.createElement("div"); itHdr.className = "item-header";
+          itHdr.innerHTML = `<span class="item-arrow">▼</span>${item.name}<span class="item-count"> · ${item.variants.length}个</span>`;
+          itHdr.addEventListener("click", e => { e.stopPropagation(); itSec.classList.toggle("collapsed"); });
+          const itBody = document.createElement("div"); itBody.className = "item-body";
+
+          item.variants.forEach(v => {
+            const card = document.createElement("div"); card.className = "variant-card";
+            const thumb = document.createElement("div"); thumb.className = "variant-thumb";
+            if (v.thumb) { thumb.classList.add("has-image"); const img = document.createElement("img"); img.src = v.thumb; thumb.appendChild(img); }
+            const ph = document.createElement("div"); ph.className = "placeholder";
+            ph.innerHTML = `<span class="placeholder-icon">🖼️</span><span>图片预留</span>`;
+            thumb.appendChild(ph);
+            card.appendChild(thumb);
+
+            const info = document.createElement("div"); info.className = "variant-info";
+            info.innerHTML = `<div class="variant-name">${v.label}</div><div class="variant-meta"><span>📐 ${v.length}×${v.width}×${v.height} cm</span><span>⚖ ${v.weight}g</span></div>`;
+            card.appendChild(info);
+
+            const btn = document.createElement("button"); btn.className = "variant-add-btn"; btn.textContent = "添加";
+            btn.addEventListener("click", e => { e.stopPropagation(); addModelFromVariant(v); });
+            card.appendChild(btn);
+            itBody.appendChild(card);
+          });
+          itSec.appendChild(itHdr); itSec.appendChild(itBody);
+          catBody.appendChild(itSec);
+        });
+        catSec.appendChild(catHdr); catSec.appendChild(catBody);
+        scroll.appendChild(catSec);
+      });
+    })();
+
+    // ══════════════════════════════════
+    // Animation
+    // ══════════════════════════════════
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
+    }
+    animate();
+
+    // ══════════════════════════════════
+    // Resize
+    // ══════════════════════════════════
+    window.addEventListener("resize", () => {
+      const w = viewerWrap.clientWidth, h = window.innerHeight;
+      camera.aspect = w / h; camera.updateProjectionMatrix();
+      renderer.setSize(w, h); labelRenderer.setSize(w, h);
+      lineMat.resolution.set(w, h);
+    });
+  </script>
+</body>
+</html>
